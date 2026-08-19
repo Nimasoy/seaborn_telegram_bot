@@ -45,19 +45,33 @@ def safe_post(url, json_payload):
             else:
                 print("⚠️ Telegram API Warning:", data.get("description"))
                 return data
-        except Exception:
-            print("🔄 Proxy connection paused. Retrying in 15s...")
-            time.sleep(15)
+        except Exception as e:
+            print(f"🔄 Connection paused ({e.__class__.__name__}). Retrying in 10s...")
+            time.sleep(10)
 
 
-def send_new_message(quote):
+def format_countdown_text(quote, diff):
+    """Formats the full text message with quote and current timer."""
+    days = diff.days
+    hours, remainder = divmod(diff.seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    time_str = (
+        f"`{days}d : {hours:02d}h : {minutes:02d}m : {seconds:02d}s`"
+        if days > 0
+        else f"`{hours:02d}h : {minutes:02d}m : {seconds:02d}s`"
+    )
+
+    return (
+        f"💭 *بیرۆکەی ئەمرۆ:*\n_{quote}_\n\n"
+        f"🎂 *COUNTDOWN TO YOUR SPECIAL DAY* 🎈\n\n"
+        f"⏳ {time_str} remaining!"
+    )
+
+
+def send_new_message(text):
     """Sends a brand new message to create a daily notification bump."""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    text = (
-        f"💭 *بیرۆکەی ئەمرۆ:*\n_{quote}_\n\n"
-        f"🎂 *COUNTDOWN TO YOUR SPECIAL DAY* 🎈\n"
-        f"⏳ `Initializing...`"
-    )
     payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}
     res = safe_post(url, payload)
     if res and res.get("ok"):
@@ -107,6 +121,9 @@ while True:
         print("🎉 Birthday message delivered!")
         break
 
+    quote = DAILY_QUOTES[now_utc.timetuple().tm_yday % len(DAILY_QUOTES)]
+    formatted_text = format_countdown_text(quote, diff)
+
     # 2. Trigger new daily message at 10:00 AM Iran Time (06:30 UTC)
     if now_utc.day != current_day and (
         now_utc.hour > TARGET_UTC_HOUR
@@ -116,35 +133,15 @@ while True:
         )
     ):
         current_day = now_utc.day
-        quote = DAILY_QUOTES[now_utc.timetuple().tm_yday % len(DAILY_QUOTES)]
-        active_message_id = send_new_message(quote)
+        active_message_id = send_new_message(formatted_text)
 
     # 3. Initial run fallback
-    if active_message_id is None:
+    elif active_message_id is None:
         current_day = now_utc.day
-        quote = DAILY_QUOTES[now_utc.timetuple().tm_yday % len(DAILY_QUOTES)]
-        active_message_id = send_new_message(quote)
+        active_message_id = send_new_message(formatted_text)
 
     # 4. Live Update Current Active Message
-    if active_message_id:
-        days = diff.days
-        hours, remainder = divmod(diff.seconds, 3600)
-        minutes, seconds = divmod(remainder, 60)
-
-        time_str = (
-            f"`{days}d : {hours:02d}h : {minutes:02d}m : {seconds:02d}s`"
-            if days > 0
-            else f"`{hours:02d}h : {minutes:02d}m : {seconds:02d}s`"
-        )
-
-        quote = DAILY_QUOTES[now_utc.timetuple().tm_yday % len(DAILY_QUOTES)]
-
-        formatted_text = (
-            f"💭 *بیرۆکەی ئەمرۆ:*\n_{quote}_\n\n"
-            f"🎂 *COUNTDOWN TO YOUR SPECIAL DAY* 🎈\n\n"
-            f"⏳ {time_str} remaining!"
-        )
-
+    else:
         safe_post(
             f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText",
             {
@@ -157,8 +154,8 @@ while True:
 
     # 5. Sleep Interval Control
     # Final 5 minutes: Update fast (every 3 seconds)
-    # Normal operation: Update every 3 minutes (180s) to avoid PythonAnywhere proxy throttling
+    # Normal operation: Update every 10 seconds (Safe on Railway)
     if total_seconds <= 300:
         time.sleep(3)
     else:
-        time.sleep(180)
+        time.sleep(10)
